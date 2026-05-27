@@ -1,0 +1,401 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== USER ====================
+
+enum UserStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SUSPENDED
+}
+
+enum RelationType {
+  FATHER
+  MOTHER
+  WIFE
+  HUSBAND
+  SON
+  DAUGHTER
+  BROTHER
+  SISTER
+  OTHER
+}
+
+model User {
+  id                String     @id @default(uuid())
+  name              String
+  phone             String     @unique
+  email             String?
+  address           String?
+  profilePictureUrl String?
+  idProofUrl        String?
+  status            UserStatus @default(PENDING)
+  dateOfBirth       DateTime?
+
+  preferredLang     String     @default("hi")   // "hi" | "en"
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  userRoles         UserRole[]         @relation("UserRoles")
+  assignedRoles     UserRole[]         @relation("AssignedByUser")
+  familyRelations   FamilyRelation[]   @relation("UserRelations")
+  relatedTo         FamilyRelation[]   @relation("RelatedUser")
+  posts             Post[]
+  votes             Vote[]
+  payments          Payment[]
+  notifications     Notification[]     @relation("UserNotifications")
+  triggeredNotifs   Notification[]     @relation("TriggeredNotifications")
+  fcmTokens         FcmToken[]
+  polls             Poll[]
+  auditLogs         AuditLog[]
+
+  @@index([phone])
+  @@index([status])
+  @@map("users")
+}
+
+model FamilyRelation {
+  id            String       @id @default(uuid())
+  userId        String
+  relatedUserId String
+  relationType  RelationType
+
+  user        User @relation("UserRelations", fields: [userId], references: [id], onDelete: Cascade)
+  relatedUser User @relation("RelatedUser", fields: [relatedUserId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, relatedUserId])
+  @@index([userId])
+  @@index([relatedUserId])
+  @@map("family_relations")
+}
+
+// ==================== RBAC ====================
+
+model Role {
+  id          String  @id @default(uuid())
+  name        String  @unique
+  description String?
+  isSystem    Boolean @default(false)
+
+
+  createdAt DateTime @default(now())
+
+  userRoles   UserRole[]
+  permissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String  @id @default(uuid())
+  code        String  @unique
+  name        String
+  description String?
+  module      String
+
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model UserRole {
+  id         String  @id @default(uuid())
+  userId     String
+  roleId     String
+  assignedBy String?
+
+  user           User  @relation("UserRoles", fields: [userId], references: [id], onDelete: Cascade)
+  role           Role  @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  assignedByUser User? @relation("AssignedByUser", fields: [assignedBy], references: [id])
+
+  assignedAt DateTime @default(now())
+
+  @@unique([userId, roleId])
+  @@index([userId])
+  @@index([roleId])
+  @@map("user_roles")
+}
+
+model RolePermission {
+  id           String @id @default(uuid())
+  roleId       String
+  permissionId String
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+// ==================== CONTENT ====================
+
+enum PostType {
+  POST
+  ANNOUNCEMENT
+}
+
+enum AttachmentType {
+  IMAGE
+  PDF
+  DOCUMENT
+}
+
+model Post {
+  id       String   @id @default(uuid())
+  authorId String
+  title    String
+  content  String
+  type     PostType @default(POST)
+  isPinned Boolean  @default(false)
+
+  author      User             @relation(fields: [authorId], references: [id])
+  attachments PostAttachment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([authorId])
+  @@index([type])
+  @@index([isPinned])
+  @@index([createdAt(sort: Desc)])
+  @@map("posts")
+}
+
+model PostAttachment {
+  id       String         @id @default(uuid())
+  postId   String
+  url      String
+  type     AttachmentType
+  fileName String?
+  fileSize Int?
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@map("post_attachments")
+}
+
+// ==================== POLLS ====================
+
+model Poll {
+  id          String    @id @default(uuid())
+  createdById String
+  question    String
+  description String?
+  isActive    Boolean   @default(true)
+  isAnonymous Boolean   @default(true)
+  startsAt    DateTime  @default(now())
+  endsAt      DateTime?
+
+  createdBy User         @relation(fields: [createdById], references: [id])
+  options   PollOption[]
+  votes     Vote[]
+
+  createdAt DateTime @default(now())
+
+  @@index([isActive])
+  @@index([createdAt(sort: Desc)])
+  @@map("polls")
+}
+
+model PollOption {
+  id        String @id @default(uuid())
+  pollId    String
+  text      String
+  voteCount Int    @default(0)
+
+  poll  Poll   @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  votes Vote[]
+
+  @@map("poll_options")
+}
+
+model Vote {
+  id       String @id @default(uuid())
+  pollId   String
+  optionId String
+  userId   String
+
+  poll   Poll       @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  option PollOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  user   User       @relation(fields: [userId], references: [id])
+
+  votedAt DateTime @default(now())
+
+  @@unique([pollId, userId])
+  @@index([pollId])
+  @@map("votes")
+}
+
+// ==================== PAYMENTS ====================
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+model MembershipPlan {
+  id              String  @id @default(uuid())
+  name            String
+  amount          Decimal @db.Decimal(10, 2)
+  currency        String  @default("INR")
+  razorpayPlanId  String?
+  cycleDayOfMonth Int     @default(31)
+  cycleMonth      Int     @default(3)
+  isActive        Boolean @default(true)
+
+  payments Payment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt @default(now())
+
+  @@map("membership_plans")
+}
+
+model Payment {
+  id                     String        @id @default(uuid())
+  userId                 String
+  planId                 String
+  amount                 Decimal       @db.Decimal(10, 2)
+  currency               String        @default("INR")
+  status                 PaymentStatus @default(PENDING)
+  razorpayPaymentId      String?
+  razorpayOrderId        String?       @unique
+  razorpaySubscriptionId String?
+  razorpaySignature      String?
+  membershipYear         Int
+  metadata               Json?
+
+  user User           @relation(fields: [userId], references: [id])
+  plan MembershipPlan @relation(fields: [planId], references: [id])
+
+  paidAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@index([status])
+  @@index([membershipYear])
+  @@index([razorpayOrderId])
+  @@map("payments")
+}
+
+// ==================== NOTIFICATIONS ====================
+
+enum NotificationChannel {
+  SMS
+  WHATSAPP
+  PUSH
+  IN_APP
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+  READ
+}
+
+model Notification {
+  id            String              @id @default(uuid())
+  userId        String
+  triggeredBy   String?
+  title         String
+  message       String
+  channel       NotificationChannel
+  status        NotificationStatus  @default(PENDING)
+  referenceType String?
+  referenceId   String?
+  metadata      Json?
+
+  user            User  @relation("UserNotifications", fields: [userId], references: [id])
+  triggeredByUser User? @relation("TriggeredNotifications", fields: [triggeredBy], references: [id])
+
+  sentAt    DateTime?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@index([status])
+  @@index([channel])
+  @@index([createdAt(sort: Desc)])
+  @@map("notifications")
+}
+
+// FCM Push Token (replaces Web Push)
+model FcmToken {
+  id         String  @id @default(uuid())
+  userId     String
+  token      String
+  deviceType String? // "web" | "android" | "ios"
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, token])
+  @@index([userId])
+  @@map("fcm_tokens")
+}
+
+// ==================== SYSTEM ====================
+
+model OtpLog {
+  id         String   @id @default(uuid())
+  phone      String
+  otpHash    String
+  attempts   Int      @default(0)
+  isVerified Boolean  @default(false)
+  expiresAt  DateTime
+
+  createdAt DateTime @default(now())
+
+  @@index([phone])
+  @@index([expiresAt])
+  @@map("otp_logs")
+}
+
+model AuditLog {
+  id        String  @id @default(uuid())
+  userId    String?
+  action    String
+  entity    String
+  entityId  String?
+  oldValue  Json?
+  newValue  Json?
+  ipAddress String?
+
+  user User? @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([entity])
+  @@index([createdAt(sort: Desc)])
+  @@map("audit_logs")
+}
+
+// System-wide configuration (admin-editable)
+model SystemConfig {
+  id    String @id @default(uuid())
+  key   String @unique
+  value String
+  label String?  // Human-readable label for UI
+
+  updatedAt DateTime @updatedAt
+
+  @@map("system_config")
+}
