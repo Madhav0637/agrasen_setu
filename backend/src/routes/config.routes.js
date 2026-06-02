@@ -3,7 +3,6 @@ const router = express.Router();
 const configService = require('../services/config.service');
 const { requirePermission } = require('../middlewares/rbac');
 const { PERMISSIONS } = require('../utils/constants');
-const prisma = require('../config/database');
 
 /**
  * GET /api/config — Get all public configurations
@@ -56,19 +55,6 @@ router.put('/membership-fee/update', requirePermission(PERMISSIONS.MANAGE_CONFIG
     }
     const fee = await configService.setMembershipFee(parseFloat(amount));
     res.json({ fee, message: 'Membership fee updated' });
-  } catch (error) {
-    next(error);
-  }
-});
-
-/**
- * TEMPORARY: STRESS TEST SUPABASE CPU
- * Note: Delete this after load testing!
- */
-router.get('/heavy-db-test', async (req, res, next) => {
-  try {
-    await prisma.$queryRaw`SELECT SUM(x) FROM generate_series(1, 5000000) as x`;
-    res.json({ status: 'Heavy query executed!' });
   } catch (error) {
     next(error);
   }
